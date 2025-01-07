@@ -1,0 +1,75 @@
+
+from mesa import Agent, Model           
+from mesa.space import MultiGrid        
+from mesa.time import RandomActivation  
+from mesa.datacollection import DataCollector   
+from mesa.visualization.modules import CanvasGrid   
+from mesa.visualization.ModularVisualization import ModularServer
+import random    
+
+
+
+def get_traffic_light_status(model):   
+    return model.light.status 
+
+
+class TrafficLight(Agent): 
+    def __init__(self, unique_id, model): 
+        super().__init__(unique_id, model) 
+        self.status = "red" 
+        self.timer = 0 
+        self.change_interval = 5 
+    def step(self): 
+        self.timer += 1
+        if self.timer >= self.change_interval: 
+            self.status = "green" if self.status == "red" else "red" 
+            self.timer = 0 
+
+class Car(Agent): 
+    def __init__(self, unique_id, model): 
+        super().__init__(unique_id, model) 
+        self.pos = None 
+    def move(self): 
+        if self.model.light.status == "green" or random.random() < 0.1: 
+            possible_moves = self.model.grid.get_neighborhood(self.pos, moore=True, include_center=False) 
+            new_position = random.choice(possible_moves) 
+            self.model.grid.move_agent(self, new_position)
+    def step(self): 
+        self.move()
+
+
+class TrafficModel(Model): 
+    def __init__(self, N, width, height): 
+        super().__init__() 
+        self.num_cars = N 
+        self.grid = MultiGrid(width, height, True)  
+        self.schedule = RandomActivation(self) 
+        self.light = TrafficLight(1, self)  
+        self.grid.place_agent(self.light, (width // 2, height // 2)) 
+        self.schedule.add(self.light) 
+        for i in range(self.num_cars): 
+            car = Car(i + 2, self)
+            x = random.randrange(self.grid.width) 
+            y = random.randrange(self.grid.height) 
+            self.grid.place_agent(car, (x, y)) 
+            self.schedule.add(car) 
+            self.datacollector = DataCollector( 
+                model_reporters={"TrafficLight": get_traffic_light_status}  
+            )        
+            self.running = True 
+    def step(self): 
+        self.datacollector.collect(self) 
+        self.schedule.step()
+
+def agent_portrayal(agent): 
+    if isinstance(agent, Car): 
+        portrayal = {"Shape": "rect", "w": 1, "h": 1, "Color": "purple","Filled": "true", "Layer": 0} 
+    elif isinstance(agent, TrafficLight): 
+        color = "green" if agent.status == "green" else "red" 
+        portrayal = {"Shape": "circle", "r": 0.5, "Color": color, "Filled": "true", "Layer": 1} 
+    return portrayal 
+
+grid = CanvasGrid(agent_portrayal, 20, 20, 500, 500) 
+server = ModularServer(TrafficModel, [grid], "Traffic Simulation", {"N": 10, "width": 20, "height": 20}) 
+server.port = 8531 
+server.launch() 
